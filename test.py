@@ -620,7 +620,7 @@ def test_with_mask(autoencoder, model_name, test_loader, mask_loader, params, im
     dice_scores = []
     iou_scores = []
     aupro = AUPRO()
-    for i in range(len(test_loader.dataset)-50):
+    for i in range(len(test_loader.dataset)):
         img = test_loader.dataset[i][0].unsqueeze(0).to(device)
         mask = np.array(mask_loader.dataset[i][0].unsqueeze(0).to(device)[0,0,:,:]) #####
         mask = np.where(mask > 0, 1, 0)
