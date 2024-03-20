@@ -24,6 +24,7 @@ import multiprocessing as mp
 
 from dataset import load_mnist_dataset, load_MVTEC
 from metrics import pixel_accuracy, IOU, dice_coefficient, AUPRO
+from ignite.contrib import metrics
 
 def MPS_BLOCK(weights, wires):
     qml.RY(weights[0], wires=wires[0])
@@ -333,10 +334,9 @@ def test_encoder_with_reconstruction(autoencoder, model_name, test_loader, param
 
 ####################################
 
-def run(chunk, seeds, lr, num_epochs, image_size, training_size, noise):
-    
+def run(chunk, seeds, lr, num_epochs, image_size, training_size, noise, thresholds):
     for i, conf in enumerate(chunk):
-        metrics = np.zeros((2,3,4)) # (seeds, thresholds, metrics)
+        metrics = np.zeros((len(thresholds), len(seeds), 5)) # (thresholds, seeds, metrics)
         train_losses = [[]]*len(seeds)
         val_losses = [[]]*len(seeds)
         for s, seed in enumerate(seeds):
@@ -345,8 +345,10 @@ def run(chunk, seeds, lr, num_epochs, image_size, training_size, noise):
 
             if dataset_name == 'carpet':
                 n_normal = 28
-            else:
+            elif dataset_name == 'wood':
                 n_normal = 19
+            else:
+                n_normal = 32
 
             model_name = dataset_name+"_KS"+str(conf['kernel_size'])+"_ST"+str(conf['stride'])+"_BD"+str(conf['bottleneck_dim'])+"_s"+str(seed)
             print("train: " + model_name)
@@ -377,7 +379,7 @@ def run(chunk, seeds, lr, num_epochs, image_size, training_size, noise):
                 
                 #if (epoch == 0) or (epoch == num_epochs-1) or (epoch % 5 == 0):
                 #plot_ae_outputs_with_reconstruction(autoencoder, model_name, test_loader, conf, image_size, epoch, device, n=10) 
-                if epoch == 9:
+                if epoch == int(num_epochs/2)-1:
                     torch.save(autoencoder.state_dict(), './models/10epochs_' + model_name + '.pt')
             print("test: " + model_name)
 
@@ -396,28 +398,28 @@ def run(chunk, seeds, lr, num_epochs, image_size, training_size, noise):
 
             #test_encoder_with_reconstruction(autoencoder, model_name, test_loader, conf, image_size, device, n_normal)
             
-            thresholds = [0.99]
             for t, threshold in enumerate(thresholds):
-                #print("Threshold: " + str(threshold))
-                acc, dice, iou, auroc = test_with_mask(autoencoder, model_name, test_loader, mask_loader, conf, image_size, device, threshold, n_normal)
+                acc, dice, iou, aupro, auroc = test_with_mask(autoencoder, model_name, test_loader, mask_loader, conf, image_size, device, threshold, n_normal)
                 metrics[t][s][0] = acc
                 metrics[t][s][1] = dice
                 metrics[t][s][2] = iou
-                metrics[t][s][3] = auroc
-            #print(accuracies)
-            #print(dice_scores)
-            #print(iou_scores)
-            #print(aurocs)
+                metrics[t][s][3] = aupro
+                metrics[t][s][4] = auroc
                 
         mean_metrics = np.mean(metrics, axis=1)
         std_metrics = np.std(metrics, axis=1)
         filename = "./results/" + dataset_name+"_KS"+str(conf['kernel_size'])+"_ST"+str(conf['stride'])+"_BD"+str(conf['bottleneck_dim'])+"_metrics.csv"
-        df = pd.concat([pd.DataFrame(mean_metrics), pd.DataFrame(std_metrics)])
-        df.columns = ["acc","dice","iou","aupro"]
+        df_means = pd.DataFrame(mean_metrics)
+        df_means.columns = ["mean_acc","mean_dice","mean_iou","mean_aupro","mean_auroc"]
+        df_std = pd.DataFrame(std_metrics)
+        df_std.columns = ["std_acc","std_dice","std_iou","std_aupro","std_auroc"]
+        df = pd.concat([df_means, df_std], axis=1)
+        df['threshold'] = thresholds
+        df = df[["threshold", "mean_acc", "std_acc", "mean_dice", "std_dice", "mean_iou", "std_iou", "mean_aupro", "std_aupro", "mean_auroc", "std_auroc"]]
         df.to_csv(filename)
         plot_loss_curve_avg(train_losses, val_losses, dataset_name+"_KS"+str(conf['kernel_size'])+"_ST"+str(conf['stride'])+"_BD"+str(conf['bottleneck_dim']))
 
-def par_runs(params, seeds, lr, num_epochs, image_size, training_size, noise, n_processes=2):
+def par_runs(params, seeds, lr, num_epochs, image_size, training_size, noise, thresholds, n_processes=2):
     
     keys, values = zip(*params.items())
     params_list = [dict(zip(keys, v)) for v in product(*values)]
@@ -426,9 +428,9 @@ def par_runs(params, seeds, lr, num_epochs, image_size, training_size, noise, n_
     
     if len(params_list) == 1:
         processes = [None]
-        run(list_chunks[0], seeds, lr, num_epochs, image_size, training_size, noise)    
+        run(list_chunks[0], seeds, lr, num_epochs, image_size, training_size, noise, thresholds)    
     else:
-        processes = [mp.Process(target=run, args=(chunk, seeds, lr, num_epochs, image_size, training_size, noise))  for i, chunk in enumerate(list_chunks)]
+        processes = [mp.Process(target=run, args=(chunk, seeds, lr, num_epochs, image_size, training_size, noise, thresholds))  for i, chunk in enumerate(list_chunks)]
 
         for p in processes:
             p.start()
@@ -620,6 +622,7 @@ def test_with_mask(autoencoder, model_name, test_loader, mask_loader, params, im
     dice_scores = []
     iou_scores = []
     aupro = AUPRO()
+    auroc = metrics.ROC_AUC()
     for i in range(len(test_loader.dataset)):
         img = test_loader.dataset[i][0].unsqueeze(0).to(device)
         mask = np.array(mask_loader.dataset[i][0].unsqueeze(0).to(device)[0,0,:,:]) #####
@@ -634,7 +637,8 @@ def test_with_mask(autoencoder, model_name, test_loader, mask_loader, params, im
         acc = pixel_accuracy(mask, diff)
         dice = dice_coefficient(mask, diff)
         iou = IOU(mask, diff)
-        aupro.update(torch.Tensor(diff).flatten(), torch.Tensor(mask).flatten())
+        aupro.update(torch.Tensor(diff).unsqueeze(0), torch.Tensor(mask).unsqueeze(0))
+        auroc.update((torch.Tensor(diff).ravel(), torch.Tensor(mask).ravel()))
         #print("(" + str(i) + "/" + str(len(test_loader.dataset)) + ") Label: " + str(test_loader.dataset[i][1]) + " - Accuracy: " + str(acc) + " - Dice: " + str(dice) + " - IoU: " + str(iou))
         accuracies.append(acc)
         dice_scores.append(dice)
@@ -644,6 +648,7 @@ def test_with_mask(autoencoder, model_name, test_loader, mask_loader, params, im
     #print("Dice Score: " + str(np.mean(dice_scores)))
     #print("IoU: " + str(np.mean(iou_scores)))
     aupro = aupro.compute()
+    auroc = auroc.compute()
     #print("AUPRO: " + str(aupro))
     
     plt.figure(figsize=(16, 4.5))
@@ -673,7 +678,7 @@ def test_with_mask(autoencoder, model_name, test_loader, mask_loader, params, im
         
     plt.savefig("./output_images/" + model_name + "_masks.png")
 
-    return np.mean(accuracies), np.mean(dice_scores), np.mean(iou_scores), aupro
+    return np.mean(accuracies), np.mean(dice_scores), np.mean(iou_scores), aupro, auroc
  
 
 if __name__ == "__main__":
@@ -698,7 +703,7 @@ if __name__ == "__main__":
     num_epochs = 20
     #image_size = 64
     #training_size = 280
-    image_size = 32
+    image_size = 16
     training_size = 50
     noise = False
 
@@ -706,7 +711,7 @@ if __name__ == "__main__":
     params = {
         'dataset': ["carpet"],
         'kernel_size': [4],
-        'stride': [1,4],
+        'stride': [4],
         'bottleneck_dim': [1],
         'mps_layers': [1],
         'n_block_wires': [2], 
@@ -714,6 +719,7 @@ if __name__ == "__main__":
     }
 
     seeds = [123,456,789]
-    par_runs(dict(params), seeds, lr, num_epochs, image_size, training_size, noise, n_processes=processes)
+    thresholds = [0.99, 0.90]
+    par_runs(dict(params), seeds, lr, num_epochs, image_size, training_size, noise, thresholds, n_processes=processes)
 
    
