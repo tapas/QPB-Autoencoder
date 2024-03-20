@@ -626,7 +626,7 @@ def test_with_mask(autoencoder, model_name, test_loader, mask_loader, params, im
     for i in range(len(test_loader.dataset)):
         img = test_loader.dataset[i][0].unsqueeze(0).to(device)
         mask = np.array(mask_loader.dataset[i][0].unsqueeze(0).to(device)[0,0,:,:]) #####
-        mask = np.where(mask > 0, 1, 0)
+        mask = np.where(mask > 0.5, 1, 0)
         with torch.no_grad():
             #rec_img = autoencoder(img).to(device)
             patches_scores = full_autoencoder.reconstruction(img)
@@ -637,8 +637,9 @@ def test_with_mask(autoencoder, model_name, test_loader, mask_loader, params, im
         acc = pixel_accuracy(mask, diff)
         dice = dice_coefficient(mask, diff)
         iou = IOU(mask, diff)
-        aupro.update(torch.Tensor(diff).unsqueeze(0), torch.Tensor(mask).unsqueeze(0))
-        auroc.update((torch.Tensor(diff).ravel(), torch.Tensor(mask).ravel()))
+        map = 1 - map
+        aupro.update(torch.Tensor(map).unsqueeze(0), torch.Tensor(mask).unsqueeze(0))
+        auroc.update((torch.Tensor(map).ravel(), torch.Tensor(mask).ravel()))
         #print("(" + str(i) + "/" + str(len(test_loader.dataset)) + ") Label: " + str(test_loader.dataset[i][1]) + " - Accuracy: " + str(acc) + " - Dice: " + str(dice) + " - IoU: " + str(iou))
         accuracies.append(acc)
         dice_scores.append(dice)
@@ -656,7 +657,7 @@ def test_with_mask(autoencoder, model_name, test_loader, mask_loader, params, im
         ax = plt.subplot(3, 10, i+1)
         img = test_loader.dataset[i+n_normal][0].unsqueeze(0).to(device)
         mask = np.array(mask_loader.dataset[i+n_normal][0].unsqueeze(0).to(device)[0,0,:,:])
-        mask = np.where(mask > 0, 1, 0)
+        mask = np.where(mask > 0.5, 1, 0)
         with torch.no_grad():
             #rec_img = autoencoder(img).to(device)
             patches_scores = full_autoencoder.reconstruction(img)
@@ -703,15 +704,15 @@ if __name__ == "__main__":
     num_epochs = 20
     #image_size = 64
     #training_size = 280
-    image_size = 16
-    training_size = 50
+    image_size = 64
+    training_size = 125
     noise = False
 
     # variable parameters
     params = {
-        'dataset': ["carpet"],
-        'kernel_size': [4],
-        'stride': [4],
+        'dataset': ["wood","carpet","leather"],
+        'kernel_size': [2],
+        'stride': [1,2],
         'bottleneck_dim': [1],
         'mps_layers': [1],
         'n_block_wires': [2], 
@@ -719,7 +720,7 @@ if __name__ == "__main__":
     }
 
     seeds = [123,456,789]
-    thresholds = [0.99, 0.90]
+    thresholds = [0.999, 0.995, 0.990]
     par_runs(dict(params), seeds, lr, num_epochs, image_size, training_size, noise, thresholds, n_processes=processes)
 
    
