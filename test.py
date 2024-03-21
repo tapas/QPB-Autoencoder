@@ -651,7 +651,7 @@ def test_with_mask(autoencoder, model_name, test_loader, mask_loader, params, im
     aupro = aupro.compute()
     auroc = auroc.compute()
     #print("AUPRO: " + str(aupro))
-    
+    '''
     plt.figure(figsize=(16, 4.5))
     for i in range(10):
         ax = plt.subplot(3, 10, i+1)
@@ -677,8 +677,8 @@ def test_with_mask(autoencoder, model_name, test_loader, mask_loader, params, im
         ax.get_xaxis().set_visible(False)
         ax.get_yaxis().set_visible(False) 
         
-    plt.savefig("./output_images/" + model_name + "_masks.png")
-
+    plt.savefig("./output_images/" + model_name + "_t" + str(threshold) + "_masks.png")
+    '''
     return np.mean(accuracies), np.mean(dice_scores), np.mean(iou_scores), aupro, auroc
  
 
