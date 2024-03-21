@@ -58,7 +58,7 @@ class AUPRO(Metric):
         dist_sync_on_step: bool = False,
         process_group: Optional[Any] = None,
         dist_sync_fn: Callable = None,
-        fpr_limit: float = 0.3,
+        fpr_limit: float = 1.0,
     ) -> None:
         super().__init__(
             #compute_on_step=compute_on_step,
@@ -184,6 +184,8 @@ class AUPRO(Metric):
             Tensor: Value of the AUPRO metric
         """
         fpr, tpr = self._compute()
+
+        fpr, _ = torch.sort(fpr) # make sure fpr is increasing
 
         aupro = auc(fpr, tpr)
         aupro = aupro / fpr[-1]  # normalize the area
