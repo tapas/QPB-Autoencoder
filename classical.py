@@ -31,12 +31,16 @@ class Classical_autoencoder(nn.Module):
         super().__init__()
 
         self.device = "cpu"
-        self.kernel_size = params['kernel_size']
-        self.stride = params['stride']
-        self.padding = params['padding']
+        self.patch_size = params['patch_size']
+        self.patch_stride = params['patch_stride']
+        self.patch_padding = params['patch_padding']
+        self.kernel_size = params['kerlen_size']
+        self.kernel_stride = params['kernel_stride']
+        self.kernel_padding = params['kernel_padding']
+        self.out_channels = params['out_channels']
         
-        self.first_conv_encoder = torch.nn.Sequential(
-            torch.nn.Conv2d(in_channels=1, out_channels=2, kernel_size=2, stride=2, padding=0),
+        self.conv_encoder = torch.nn.Sequential(
+            torch.nn.Conv2d(in_channels=1, out_channels=self.out_channels, kernel_size=self.kernel_size, stride=self.kernel_stride, padding=self.kernel_padding),
             torch.nn.ReLU(True)
         )
         self.maxpooling = torch.nn.MaxPool2d(kernel_size=2, stride=2, padding=0, return_indices=True)
@@ -51,7 +55,7 @@ class Classical_autoencoder(nn.Module):
             nn.Unflatten(dim=1, unflattened_size=(2, 1, 1))
         )
         self.unpooling = nn.MaxUnpool2d(kernel_size=self.kernel_size, stride=2, padding=0)
-        self.first_conv_decoder = torch.nn.Sequential(
+        self.conv_decoder = torch.nn.Sequential(
             torch.nn.ConvTranspose2d(in_channels=2, out_channels=1, kernel_size=2, stride=2, padding=0),
             torch.nn.Sigmoid(),
             torch.nn.Flatten()
@@ -75,23 +79,23 @@ class Classical_autoencoder(nn.Module):
     def forward(self, img):
         bs, ch, h, w = img.size()
 
-        patch_no = ((h - self.kernel_size) // self.stride + 1) * ((h - self.kernel_size) // self.stride + 1)    
-        padding = self.padding
-        if padding > 0:
-            img = nn.ZeroPad2d(padding)(img)
-            h = h + padding*2
-            w = w + padding*2
+        patch_no = ((h - self.patch_size) // self.patch_stride + 1) * ((h - self.patch_size) // self.patch_stride + 1)    
+        patch_padding = self.patch_padding
+        if patch_padding > 0:
+            img = nn.ZeroPad2d(patch_padding)(img)
+            h = h + patch_padding*2
+            w = w + patch_padding*2
         out = torch.zeros((bs, 1, h, w), device=self.device) 
         count_image = torch.zeros((bs, 1, w, h), device=self.device)
             #print(b,bs)
         for b in range(bs):
-            for j in range(0, h - self.kernel_size + 1, self.stride):
-                for k in range(0, w - self.kernel_size + 1, self.stride):
-                    patch_id = (j // self.stride) * (h // self.stride) + (k // self.stride)
+            for j in range(0, h - self.patch_size + 1, self.patch_stride):
+                for k in range(0, w - self.patch_size + 1, self.patch_stride):
+                    patch_id = (j // self.patch_stride) * (h // self.patch_stride) + (k // self.patch_stride)
                     c = torch.tensor([patch_id/patch_no], device=self.device)
-                    inputs = [img[b, 0, j + i, k + l] for i in range(self.kernel_size) for l in range(self.kernel_size)]
+                    inputs = [img[b, 0, j + i, k + l] for i in range(self.patch_size) for l in range(self.patch_size)]
                     inputs = torch.tensor(inputs, device=self.device)
-                    inputs = torch.reshape(inputs, (1,1,self.kernel_size,self.kernel_size))
+                    inputs = torch.reshape(inputs, (1,1,self.patch_size,self.patch_size))
                     #inputs = self.linear_bottleneck_linear(inputs)
                     #inputs = self.linear_encoder(inputs)
                     #inputs = self.bottleneck2(torch.reshape(torch.cat((torch.reshape(inputs, (3,)), c)),(1,4)))
@@ -99,22 +103,22 @@ class Classical_autoencoder(nn.Module):
                     #inputs = self.linear_decoder(inputs)
                     
                     
-                    inputs = self.first_conv_encoder(inputs)
+                    inputs = self.conv_encoder(inputs)
                     inputs, idx = self.maxpooling(inputs)
                     #print(inputs.shape)
                     inputs = self.bottleneck(inputs)
                     #inputs = self.bottleneck(torch.reshape(torch.cat((torch.reshape(inputs, (1,)), c)),(1,2)))
                     inputs = self.unpooling(inputs, idx)
-                    inputs = self.first_conv_decoder(inputs)
+                    inputs = self.conv_decoder(inputs)
                     
-                    for i in range(self.kernel_size):
-                        for l in range(self.kernel_size):
-                            out[b, 0, j + i, k + l] += inputs[0][i * self.kernel_size + l]
-                    count_image[b, 0, j:j+self.kernel_size, k:k+self.kernel_size] += 1
+                    for i in range(self.patch_size):
+                        for l in range(self.patch_size):
+                            out[b, 0, j + i, k + l] += inputs[0][i * self.patch_size + l]
+                    count_image[b, 0, j:j+self.patch_size, k:k+self.patch_size] += 1
         out /= count_image
 
-        if padding > 0:
-            out = out[:, :, padding:-padding, padding:-padding]           
+        if patch_padding > 0:
+            out = out[:, :, patch_padding:-patch_padding, patch_padding:-patch_padding]           
         return out
 ####################################
 
@@ -134,7 +138,7 @@ def run(chunk, seeds, lr, num_epochs, image_size, training_size, noise, threshol
             else:
                 n_normal = 32
 
-            model_name = "Classical_"+dataset_name+"_KS"+str(conf['kernel_size'])+"_ST"+str(conf['stride'])+"_BD"+str(conf['bottleneck_dim'])+"_s"+str(seed)
+            model_name = "Classical_"+dataset_name+"_KS"+str(conf['patch_size'])+"_ST"+str(conf['patch_stride'])+"_BD"+str(conf['bottleneck_dim'])+"_s"+str(seed)
             print("train: " + model_name)
             
             train_loader, valid_loader, test_loader, mask_loader = load_MVTEC(dataset_name, training_size, image_size)
@@ -190,7 +194,7 @@ def run(chunk, seeds, lr, num_epochs, image_size, training_size, noise, threshol
                 
         mean_metrics = np.mean(metrics, axis=1)
         std_metrics = np.std(metrics, axis=1)
-        filename = "./results/Classical_" + dataset_name+"_KS"+str(conf['kernel_size'])+"_ST"+str(conf['stride'])+"_BD"+str(conf['bottleneck_dim'])+"_metrics.csv"
+        filename = "./results/Classical_" + dataset_name+"_KS"+str(conf['patch_size'])+"_ST"+str(conf['patch_stride'])+"_BD"+str(conf['bottleneck_dim'])+"_metrics.csv"
         df_means = pd.DataFrame(mean_metrics)
         df_means.columns = ["mean_acc","mean_dice","mean_iou","mean_aupro","mean_auroc"]
         df_std = pd.DataFrame(std_metrics)
@@ -199,7 +203,7 @@ def run(chunk, seeds, lr, num_epochs, image_size, training_size, noise, threshol
         df['threshold'] = thresholds
         df = df[["threshold", "mean_acc", "std_acc", "mean_dice", "std_dice", "mean_iou", "std_iou", "mean_aupro", "std_aupro", "mean_auroc", "std_auroc"]]
         df.to_csv(filename)
-        plot_loss_curve_avg(train_losses, val_losses, dataset_name+"_KS"+str(conf['kernel_size'])+"_ST"+str(conf['stride'])+"_BD"+str(conf['bottleneck_dim']))
+        plot_loss_curve_avg(train_losses, val_losses, dataset_name+"_KS"+str(conf['patch_size'])+"_ST"+str(conf['patch_stride'])+"_BD"+str(conf['bottleneck_dim']))
 
 def par_runs(params, seeds, lr, num_epochs, image_size, training_size, noise, thresholds, n_processes=2):
     
@@ -455,13 +459,13 @@ if __name__ == "__main__":
     # variable parameters
     params = {
         'dataset': ["wood"],
-        'kernel_size': [4],
-        'stride': [1],
-        'padding': [0],
-        'bottleneck_dim': [1],
-        'mps_layers': [1],
-        'n_block_wires': [2], 
-        'n_params_block': [2],
+        'patch_size': [4],
+        'patch_stride': [1],
+        'patch_padding': [0],
+        'kernel_size': [2],
+        'kernel_stride': [1],
+        'kernel_padding': [0],
+        'out_channels': [1]
     }
 
     seeds = [123,456,789]
