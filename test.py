@@ -727,9 +727,14 @@ if __name__ == "__main__":
     num_epochs = 20
     #image_size = 64
     #training_size = 280
-    image_size = 16 
+    image_size = 48 
     training_size = 125
     noise = False
+
+    print("Image size: " + str(image_size))
+    print("Training size: " + str(training_size))
+    print("Learning rate: " + str(lr))
+    print("Epochs: " + str(num_epochs))
 
     # variable parameters
     params = {
