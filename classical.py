@@ -141,7 +141,11 @@ def run(chunk, seeds, lr, num_epochs, image_size, training_size, noise, threshol
             model_name = "Classical_"+dataset_name+"_KS"+str(conf['patch_size'])+"_ST"+str(conf['patch_stride'])+"_BD"+str(conf['bottleneck_dim'])+"_s"+str(seed)
             print("train: " + model_name)
             
-            train_loader, valid_loader, test_loader, mask_loader = load_MVTEC(dataset_name, training_size, image_size)
+            if dataset_name == 'MNIST':
+                train_loader, valid_loader, test_loader, mask_loader = load_mnist_dataset(training_size, image_size)
+            else:
+                train_loader, valid_loader, test_loader, mask_loader = load_MVTEC(dataset_name, training_size, image_size)
+            
             loss_fn = torch.nn.MSELoss()
 
             device = "cpu"
@@ -458,7 +462,7 @@ if __name__ == "__main__":
 
     # variable parameters
     params = {
-        'dataset': ["wood"],
+        'dataset': ["mnist"],
         'patch_size': [4],
         'patch_stride': [1],
         'patch_padding': [0],

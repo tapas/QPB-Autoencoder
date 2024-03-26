@@ -90,10 +90,10 @@ class Encoder(nn.Module):
                 #qml.CSWAP(wires=[self.wires*2 + 1 + self.discarded_wires, 2, 7])
             
                 qml.Hadamard(wires=self.wires + self.discarded_wires)
- 
-                p = qml.probs(op=qml.PauliZ(wires=self.wires + self.discarded_wires))
-                return p
-                #return qml.expval(qml.PauliZ(wires=self.wires + self.discarded_wires + 2))
+
+                #p = qml.probs(op=qml.PauliZ(wires=self.wires + self.discarded_wires))
+                #return p
+                return qml.expval(qml.PauliZ(wires=self.wires + self.discarded_wires))
 
  
         
@@ -138,7 +138,7 @@ class Encoder(nn.Module):
 
                     a = torch.tensor([img[b, 0, j + i, k + l] for i in range(kernel_size) for l in range(kernel_size)])
                     #out[b, 0, idx] = self.circuit(torch.cat((a, x_patch, y_patch)))[1]
-                    out[b, 0, idx] = self.circuit(a)[0]
+                    out[b, 0, idx] = self.circuit(a)
                     idx = idx + 1
 
         map = torch.zeros((bs, self.image_size + 2*self.padding, self.image_size + 2*self.padding))
@@ -373,7 +373,11 @@ def run(chunk, seeds, lr, num_epochs, image_size, training_size, noise, threshol
             model_name = dataset_name+"_KS"+str(conf['kernel_size'])+"_ST"+str(conf['stride'])+"_BD"+str(conf['bottleneck_dim'])+"_s"+str(seed)
             print("train: " + model_name)
             
-            train_loader, valid_loader, test_loader, mask_loader = load_MVTEC(dataset_name, training_size, image_size)
+            if dataset_name == 'mnist':
+                train_loader, valid_loader, test_loader, mask_loader = load_mnist_dataset(training_size, image_size)
+            else:
+                train_loader, valid_loader, test_loader, mask_loader = load_MVTEC(dataset_name, training_size, image_size)
+            
             loss_fn = loss_function
 
             device = "cpu"
@@ -393,7 +397,7 @@ def run(chunk, seeds, lr, num_epochs, image_size, training_size, noise, threshol
             for epoch in range(num_epochs):
                 train_loss = train_epoch(autoencoder, device, train_loader, loss_fn, optim, noise=noise)
                 val_loss = test_epoch(autoencoder, device, valid_loader, loss_fn, noise=noise)
-                #print('\n EPOCH {}/{} \t train loss {} \t val loss {}'.format(epoch + 1, num_epochs, train_loss, val_loss))
+                print('\n EPOCH {}/{} \t train loss {} \t val loss {}'.format(epoch + 1, num_epochs, train_loss, val_loss))
                 train_loss_seed.append(train_loss)
                 val_loss_seed.append(val_loss)
                 
@@ -540,7 +544,7 @@ def build_map(patches_scores, image_size, patch_size, stride, padding):
     if padding > 0:
         map = map[padding:-padding, padding:-padding]
  
-    return map
+    return (map + 1)/2
 
 def plot_ae_outputs_with_reconstruction(autoencoder, model_name, test_loader, params, image_size, epoch, device, n=10):
     
@@ -587,7 +591,7 @@ def plot_ae_outputs_with_reconstruction(autoencoder, model_name, test_loader, pa
 
 def loss_function(output):
     #print(torch.mean(output, 2))    
-    return 1-torch.mean(output)
+    return (1-torch.mean(output))/2
 
 def plot_loss_curve(train_loss, val_loss, model_name):
     # Plot losses
@@ -653,7 +657,7 @@ def test_with_mask(autoencoder, model_name, test_loader, mask_loader, params, im
         map = build_map(patches_scores, image_size, autoencoder.kernel_size, autoencoder.stride, autoencoder.padding)
         #print(np.min(map))
         #print(np.max(map))
-        diff = np.where(map > threshold, 0, 1) #anomalies are white in the masks
+        diff = np.where(map > threshold, 0, 1) #anomalies are white (1) in the masks
         acc = pixel_accuracy(mask, diff)
         dice = dice_coefficient(mask, diff)
         iou = IOU(mask, diff)
@@ -704,7 +708,6 @@ def test_with_mask(autoencoder, model_name, test_loader, mask_loader, params, im
 
 if __name__ == "__main__":
     
-
     if len(sys.argv) != 2:
         print("ERROR: type '" + str(sys.argv[0]) + " n_processes' to execute the test")
         exit()
@@ -724,13 +727,13 @@ if __name__ == "__main__":
     num_epochs = 20
     #image_size = 64
     #training_size = 280
-    image_size = 48 
+    image_size = 16 
     training_size = 125
     noise = False
 
     # variable parameters
     params = {
-        'dataset': ["carpet","leather","wood"],
+        'dataset': ["carpet","wood","leather"],
         'kernel_size': [2],
         'stride': [1,2],
         'bottleneck_dim': [1],

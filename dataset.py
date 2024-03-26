@@ -22,7 +22,7 @@ class CustomImageFolder(ImageFolder):
         target = assign_label(target)
         return img, target
 
-def load_mnist_dataset(image_size):
+def load_mnist_dataset(training_size, image_size):
     data_dir = 'dataset'
 
     train_transform = transforms.Compose([
@@ -50,7 +50,7 @@ def load_mnist_dataset(image_size):
     test_dataset.targets = [0 if test_dataset.targets[i]==normal else 1 for i in range(len(test_dataset.targets))]
     test_dataset.data = test_dataset.data[test_idx]
     
-    subset_size_training = 100
+    subset_size_training = training_size
     subset_indices_training = torch.randperm(len(train_dataset))[:subset_size_training]
     train_dataset = torch.utils.data.Subset(train_dataset, subset_indices_training)
 
@@ -72,7 +72,7 @@ def load_mnist_dataset(image_size):
     valid_loader = torch.utils.data.DataLoader(val_data, batch_size=batch_size)
     test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=batch_size, shuffle=True)
 
-    return train_loader, valid_loader, test_loader
+    return train_loader, valid_loader, test_loader, None
 
 def load_malaria():
 
