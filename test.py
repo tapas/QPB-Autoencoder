@@ -20,7 +20,7 @@ import seaborn as sns
 #import medmnist
 
 from itertools import product
-import multiprocessing as mp
+import torch.multiprocessing as mp
 
 from dataset import load_mnist_dataset, load_MVTEC
 from metrics import pixel_accuracy, IOU, dice_coefficient, AUPRO
@@ -112,14 +112,13 @@ class Encoder(nn.Module):
         plt.savefig("circuit.png")
         plt.close()
         '''
-        
-    
+
     def forward(self, img):
 
         bs, ch, h, w = img.size()
- 
+
         kernel_size = self.kernel_size
- 
+
         padding = self.padding
         if padding > 0:
             img = nn.ZeroPad2d(padding)(img)
@@ -141,7 +140,28 @@ class Encoder(nn.Module):
                     #out[b, 0, idx] = self.circuit(torch.cat((a, x_patch, y_patch)))[1]
                     out[b, 0, idx] = self.circuit(a)[0]
                     idx = idx + 1
-        return out
+
+        map = torch.zeros((bs, self.image_size + 2*self.padding, self.image_size + 2*self.padding))
+        count_image = torch.zeros((bs, self.image_size + 2*self.padding, self.image_size + 2*self.padding))
+        ppr = (self.image_size + 2*self.padding - self.kernel_size) // self.stride + 1
+        for b in range(bs):
+            for p in range(patch_no):
+                row_index = p // ppr
+                col_index = p % ppr
+                start_row = row_index * self.stride
+                start_col = col_index * self.stride
+            
+                for k in range(self.kernel_size):
+                    for l in range(self.kernel_size):
+                        map[b, start_row+k, start_col+l] += out[b, 0, p]
+                        count_image[b, start_row+k, start_col+l] += 1
+    
+        map /= count_image
+        if padding > 0:
+            map = map[:, padding:-padding, padding:-padding]
+    
+        return map
+
  
 class Autoencoder(nn.Module):
     
@@ -704,13 +724,13 @@ if __name__ == "__main__":
     num_epochs = 20
     #image_size = 64
     #training_size = 280
-    image_size = 64
+    image_size = 48 
     training_size = 125
     noise = False
 
     # variable parameters
     params = {
-        'dataset': ["wood","carpet","leather"],
+        'dataset': ["carpet","leather","wood"],
         'kernel_size': [2],
         'stride': [1,2],
         'bottleneck_dim': [1],
