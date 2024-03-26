@@ -727,7 +727,7 @@ if __name__ == "__main__":
     num_epochs = 20
     #image_size = 64
     #training_size = 280
-    image_size = 48 
+    image_size = 40 
     training_size = 125
     noise = False
 
