@@ -354,7 +354,7 @@ def test_encoder_with_reconstruction(autoencoder, model_name, test_loader, param
 
 ####################################
 
-def run(chunk, seeds, lr, num_epochs, image_size, training_size, noise, thresholds):
+def run(chunk, seeds, lr, num_epochs, image_size, training_size, noise, thresholds, train):
     for i, conf in enumerate(chunk):
         metrics = np.zeros((len(thresholds), len(seeds), 5)) # (thresholds, seeds, metrics)
         train_losses = [[]]*len(seeds)
@@ -371,7 +371,7 @@ def run(chunk, seeds, lr, num_epochs, image_size, training_size, noise, threshol
                 n_normal = 32
 
             model_name = dataset_name+"_KS"+str(conf['kernel_size'])+"_ST"+str(conf['stride'])+"_BD"+str(conf['bottleneck_dim'])+"_s"+str(seed)
-            print("train: " + model_name)
+            
             
             if dataset_name == 'mnist':
                 train_loader, valid_loader, test_loader, mask_loader = load_mnist_dataset(training_size, image_size)
@@ -381,40 +381,43 @@ def run(chunk, seeds, lr, num_epochs, image_size, training_size, noise, threshol
             loss_fn = loss_function
 
             device = "cpu"
-
-            autoencoder = Autoencoder(image_size, conf)
             
-            params_to_optimize = [
-                {'params': autoencoder.parameters()},
-            ]
-            optim = torch.optim.Adam(params_to_optimize, lr=lr)
-        
-            autoencoder.to(device)
 
-            #diz_loss = {'train_loss':[],'val_loss':[]}
-            train_loss_seed = []
-            val_loss_seed = []
-            for epoch in range(num_epochs):
-                train_loss = train_epoch(autoencoder, device, train_loader, loss_fn, optim, noise=noise)
-                val_loss = test_epoch(autoencoder, device, valid_loader, loss_fn, noise=noise)
-                print('\n EPOCH {}/{} \t train loss {} \t val loss {}'.format(epoch + 1, num_epochs, train_loss, val_loss))
-                train_loss_seed.append(train_loss)
-                val_loss_seed.append(val_loss)
+            if train:
+                print("train: " + model_name)
+                autoencoder = Autoencoder(image_size, conf)
                 
-                #if (epoch == 0) or (epoch == num_epochs-1) or (epoch % 5 == 0):
-                #plot_ae_outputs_with_reconstruction(autoencoder, model_name, test_loader, conf, image_size, epoch, device, n=10) 
-                if epoch == int(num_epochs/2)-1:
-                    torch.save(autoencoder.state_dict(), './models/10epochs_' + model_name + '.pt')
+                params_to_optimize = [
+                    {'params': autoencoder.parameters()},
+                ]
+                optim = torch.optim.Adam(params_to_optimize, lr=lr)
+            
+                autoencoder.to(device)
+
+                #diz_loss = {'train_loss':[],'val_loss':[]}
+                train_loss_seed = []
+                val_loss_seed = []
+                for epoch in range(num_epochs):
+                    train_loss = train_epoch(autoencoder, device, train_loader, loss_fn, optim, noise=noise)
+                    val_loss = test_epoch(autoencoder, device, valid_loader, loss_fn, noise=noise)
+                    print('\n EPOCH {}/{} \t train loss {} \t val loss {}'.format(epoch + 1, num_epochs, train_loss, val_loss))
+                    train_loss_seed.append(train_loss)
+                    val_loss_seed.append(val_loss)
+                    
+                    #if (epoch == 0) or (epoch == num_epochs-1) or (epoch % 5 == 0):
+                    #plot_ae_outputs_with_reconstruction(autoencoder, model_name, test_loader, conf, image_size, epoch, device, n=10) 
+                    if epoch == int(num_epochs/2)-1:
+                        torch.save(autoencoder.state_dict(), './models/10epochs_' + model_name + '.pt')
+
+                train_losses[s] = train_loss_seed
+                val_losses[s] = val_loss_seed
+
+                pd.DataFrame({'train_loss': train_losses[s], 'val_loss': val_losses[s]}).to_csv("./results/" + model_name + "_losses.csv")
+                torch.save(autoencoder.state_dict(), './models/20epochs_' + model_name + '.pt')
+                
+                plot_loss_curve(train_losses[s], val_losses[s], model_name)
+            
             print("test: " + model_name)
-
-            train_losses[s] = train_loss_seed
-            val_losses[s] = val_loss_seed
-
-            pd.DataFrame({'train_loss': train_losses[s], 'val_loss': val_losses[s]}).to_csv("./results/" + model_name + "_losses.csv")
-            torch.save(autoencoder.state_dict(), './models/20epochs_' + model_name + '.pt')
-            
-            plot_loss_curve(train_losses[s], val_losses[s], model_name)
-            
             autoencoder = Autoencoder(image_size, conf)
             autoencoder.load_state_dict(torch.load("./models/20epochs_" + model_name + ".pt"))
             autoencoder.to(device)
@@ -423,6 +426,7 @@ def run(chunk, seeds, lr, num_epochs, image_size, training_size, noise, threshol
             #test_encoder_with_reconstruction(autoencoder, model_name, test_loader, conf, image_size, device, n_normal)
             
             for t, threshold in enumerate(thresholds):
+                print("Dataset: " + str(dataset_name) + " Tresholds: " + str(threshold) + " Seed: " + str(seed))
                 acc, dice, iou, aupro, auroc = test_with_mask(autoencoder, model_name, test_loader, mask_loader, conf, image_size, device, threshold, n_normal)
                 metrics[t][s][0] = acc
                 metrics[t][s][1] = dice
@@ -441,9 +445,11 @@ def run(chunk, seeds, lr, num_epochs, image_size, training_size, noise, threshol
         df['threshold'] = thresholds
         df = df[["threshold", "mean_acc", "std_acc", "mean_dice", "std_dice", "mean_iou", "std_iou", "mean_aupro", "std_aupro", "mean_auroc", "std_auroc"]]
         df.to_csv(filename)
-        plot_loss_curve_avg(train_losses, val_losses, dataset_name+"_KS"+str(conf['kernel_size'])+"_ST"+str(conf['stride'])+"_BD"+str(conf['bottleneck_dim']))
+        
+        if train:
+            plot_loss_curve_avg(train_losses, val_losses, dataset_name+"_KS"+str(conf['kernel_size'])+"_ST"+str(conf['stride'])+"_BD"+str(conf['bottleneck_dim']))
 
-def par_runs(params, seeds, lr, num_epochs, image_size, training_size, noise, thresholds, n_processes=2):
+def par_runs(params, seeds, lr, num_epochs, image_size, training_size, noise, thresholds, n_processes=2, train=True):
     
     keys, values = zip(*params.items())
     params_list = [dict(zip(keys, v)) for v in product(*values)]
@@ -452,9 +458,9 @@ def par_runs(params, seeds, lr, num_epochs, image_size, training_size, noise, th
     
     if len(params_list) == 1:
         processes = [None]
-        run(list_chunks[0], seeds, lr, num_epochs, image_size, training_size, noise, thresholds)    
+        run(list_chunks[0], seeds, lr, num_epochs, image_size, training_size, noise, thresholds, train)    
     else:
-        processes = [mp.Process(target=run, args=(chunk, seeds, lr, num_epochs, image_size, training_size, noise, thresholds))  for i, chunk in enumerate(list_chunks)]
+        processes = [mp.Process(target=run, args=(chunk, seeds, lr, num_epochs, image_size, training_size, noise, thresholds, train))  for i, chunk in enumerate(list_chunks)]
 
         for p in processes:
             p.start()
@@ -675,36 +681,79 @@ def test_with_mask(autoencoder, model_name, test_loader, mask_loader, params, im
     aupro = aupro.compute()
     auroc = auroc.compute()
     #print("AUPRO: " + str(aupro))
-    '''
-    plt.figure(figsize=(16, 4.5))
-    for i in range(10):
-        ax = plt.subplot(3, 10, i+1)
-        img = test_loader.dataset[i+n_normal][0].unsqueeze(0).to(device)
-        mask = np.array(mask_loader.dataset[i+n_normal][0].unsqueeze(0).to(device)[0,0,:,:])
+
+    return np.mean(accuracies), np.mean(dice_scores), np.mean(iou_scores), aupro, auroc
+ 
+def plot_localizations(conf, image_size, threshold=0.025, device='cpu'):
+    
+    dataset_name = conf['dataset'] 
+    seed = conf['seed']
+
+    if dataset_name == 'carpet':
+        n_normal = 28
+    elif dataset_name == 'wood':
+        n_normal = 19
+    else:
+        n_normal = 32
+
+    n_normal = 5
+
+    model_name = dataset_name+"_KS"+str(conf['kernel_size'])+"_ST"+str(conf['stride'])+"_BD"+str(conf['bottleneck_dim'])+"_s"+str(seed)
+    
+    
+    if dataset_name == 'mnist':
+        train_loader, valid_loader, test_loader, mask_loader = load_mnist_dataset(training_size, image_size)
+    else:
+        train_loader, valid_loader, test_loader, mask_loader = load_MVTEC(dataset_name, training_size, image_size)
+    
+
+    print("test: " + model_name)
+    autoencoder = Autoencoder(image_size, conf)
+    autoencoder.load_state_dict(torch.load("./models/20epochs_" + model_name + ".pt"))
+    autoencoder.to(device)
+    autoencoder.eval()
+    
+    gen = list(autoencoder.autoencoder[0].circuit.parameters())[0]
+    weights = []
+    for w in gen:
+        weights.append(w)
+
+    full_autoencoder = Encoder_Decoder(weights, image_size, conf)
+
+    plt.figure(figsize=(8, 4.5))
+    n_images = 5
+    for i in range(n_images):
+        if i == 0:
+            index = 13
+        else:
+            index = i + n_normal
+        ax = plt.subplot(3, n_images, i+1)
+        img = test_loader.dataset[index][0].unsqueeze(0).to(device)
+        mask = np.array(mask_loader.dataset[index][0].unsqueeze(0).to(device)[0,0,:,:])
         mask = np.where(mask > 0.5, 1, 0)
         with torch.no_grad():
             #rec_img = autoencoder(img).to(device)
             patches_scores = full_autoencoder.reconstruction(img)
         map = build_map(patches_scores, image_size, autoencoder.kernel_size, autoencoder.stride, autoencoder.padding)
-        diff = np.where(map > threshold, 0, 1) #anomalies are white in the masks
+        #diff = np.where(map > threshold, 0, 1) #anomalies are white in the masks
+        #diff = 1 - map
+        diff = 1-map
         plt.imshow(img.cpu().squeeze().numpy(), cmap='gist_gray')
         #ax.set_title("label: " + str(test_loader.dataset[i][1]), y=0, pad=-15)
         ax.get_xaxis().set_visible(False)
         ax.get_yaxis().set_visible(False)  
-        ax = plt.subplot(3, 10, i + 1 + 10)
-        plt.imshow(diff, cmap='gist_gray')  
+        ax = plt.subplot(3, n_images, i + 1 + n_images)
+        plt.imshow(diff, cmap='jet')  
         ax.get_xaxis().set_visible(False)
         ax.get_yaxis().set_visible(False)  
         #ax.set_title(round(loss_fn(img).item(), 4), y=0, pad=-15)
-        ax = plt.subplot(3, 10, i + 1 + 20)
+        ax = plt.subplot(3, n_images, i + 1 + n_images*2)
         plt.imshow(mask.squeeze().numpy(), cmap='gist_gray')  
         ax.get_xaxis().set_visible(False)
         ax.get_yaxis().set_visible(False) 
-        
+          
     plt.savefig("./output_images/" + model_name + "_t" + str(threshold) + "_masks.png")
-    '''
-    return np.mean(accuracies), np.mean(dice_scores), np.mean(iou_scores), aupro, auroc
- 
+
 
 if __name__ == "__main__":
     
@@ -727,7 +776,7 @@ if __name__ == "__main__":
     num_epochs = 20
     #image_size = 64
     #training_size = 280
-    image_size = 40 
+    image_size = 32 
     training_size = 125
     noise = False
 
@@ -736,19 +785,32 @@ if __name__ == "__main__":
     print("Learning rate: " + str(lr))
     print("Epochs: " + str(num_epochs))
 
+    '''
+    conf = {
+        'seed': 789,
+        'dataset': "busi",
+        'kernel_size': 4,
+        'stride': 1,
+        'bottleneck_dim': 1,
+        'mps_layers': 1,
+        'n_block_wires': 2, 
+        'n_params_block': 2,
+    }
+    plot_localizations(conf, image_size, threshold=0.97, device='cpu')
+    exit()
+    '''
+
     # variable parameters
     params = {
-        'dataset': ["carpet","wood","leather"],
-        'kernel_size': [2],
-        'stride': [1,2],
-        'bottleneck_dim': [1],
+        'dataset': ["carpet","leather","wood","new_busi"],
+        'kernel_size': [4],
+        'stride': [1],
+        'bottleneck_dim': [2],
         'mps_layers': [1],
         'n_block_wires': [2], 
         'n_params_block': [2],
     }
 
     seeds = [123,456,789]
-    thresholds = [0.999, 0.995, 0.990]
-    par_runs(dict(params), seeds, lr, num_epochs, image_size, training_size, noise, thresholds, n_processes=processes)
-
-   
+    thresholds = [0.950,0.955,0.960,0.965,0.970,0.975,0.980,0.985,0.990,0.995,0.999]
+    par_runs(dict(params), seeds, lr, num_epochs, image_size, training_size, noise, thresholds, n_processes=processes, train=False)

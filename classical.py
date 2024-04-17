@@ -31,52 +31,114 @@ class Classical_autoencoder(nn.Module):
         super().__init__()
 
         self.device = "cpu"
-        self.patch_size = params['patch_size']
-        self.patch_stride = params['patch_stride']
-        self.patch_padding = params['patch_padding']
-        self.kernel_size = params['kerlen_size']
-        self.kernel_stride = params['kernel_stride']
-        self.kernel_padding = params['kernel_padding']
-        self.out_channels = params['out_channels']
-        
+        self.kernel_size = params['kernel_size']
+        self.stride = params['stride']
+        self.padding = 0
+        self.image_size = image_size
+
         self.conv_encoder = torch.nn.Sequential(
-            torch.nn.Conv2d(in_channels=1, out_channels=self.out_channels, kernel_size=self.kernel_size, stride=self.kernel_stride, padding=self.kernel_padding),
+            torch.nn.Conv2d(in_channels=1, out_channels=4, kernel_size=2, stride=2, padding=0),
             torch.nn.ReLU(True)
         )
         self.maxpooling = torch.nn.MaxPool2d(kernel_size=2, stride=2, padding=0, return_indices=True)
         self.bottleneck = torch.nn.Sequential(
-            torch.nn.Flatten(),
+            #torch.nn.Flatten(),
             torch.nn.Linear(2, 2),
             torch.nn.ReLU(True),
             #torch.nn.Linear(1, 2),
             #torch.nn.ReLU(True),
             #torch.nn.Linear(2, 1),
             #torch.nn.ReLU(True),
-            nn.Unflatten(dim=1, unflattened_size=(2, 1, 1))
+            #nn.Unflatten(dim=1, unflattened_size=(2, 1, 1))
         )
-        self.unpooling = nn.MaxUnpool2d(kernel_size=self.kernel_size, stride=2, padding=0)
+        self.unpooling = nn.MaxUnpool2d(kernel_size=2, stride=2, padding=0)
         self.conv_decoder = torch.nn.Sequential(
-            torch.nn.ConvTranspose2d(in_channels=2, out_channels=1, kernel_size=2, stride=2, padding=0),
+            torch.nn.ConvTranspose2d(in_channels=4, out_channels=1, kernel_size=2, stride=2, padding=0),
             torch.nn.Sigmoid(),
             torch.nn.Flatten()
         )
+        
         self.linear_bottleneck_linear = torch.nn.Sequential(
-            torch.nn.Flatten(),
+            #torch.nn.Flatten(),
             #torch.nn.Linear(self.kernel_size*self.kernel_size, self.kernel_size*self.kernel_size),
             #torch.nn.ReLU(True),
-            torch.nn.Linear(self.kernel_size*self.kernel_size, 4),
+            torch.nn.Linear(self.kernel_size*self.kernel_size, 10),
             torch.nn.ReLU(True),
-            torch.nn.Linear(4, 4),
+            torch.nn.Linear(10, 10),
             torch.nn.ReLU(True),
-            torch.nn.Linear(4, self.kernel_size*self.kernel_size),
+            torch.nn.Linear(10, self.kernel_size*self.kernel_size),
             torch.nn.ReLU(True),
             #torch.nn.Linear(self.kernel_size*self.kernel_size, self.kernel_size*self.kernel_size),
             #torch.nn.Sigmoid(),
-            torch.nn.Flatten()
+            #torch.nn.Flatten()
         )
         
-        
     def forward(self, img):
+
+        bs, ch, h, w = img.size()
+
+        kernel_size = self.kernel_size
+
+        padding = self.padding
+        if padding > 0:
+            img = nn.ZeroPad2d(padding)(img)
+            h = h + padding*2
+            w = w + padding*2
+
+        patch_no = ((h - kernel_size) // self.stride + 1) * ((h - kernel_size) // self.stride + 1)    
+        out = torch.zeros((bs, 1, patch_no))
+        
+        for b in range(bs):
+            #print(b,bs)
+            idx = 0
+            for j in range(0, h - kernel_size + 1, self.stride):
+                for k in range(0, w - kernel_size + 1, self.stride):
+                    #get patch id
+                    patch_id = (j // self.stride) * ((w - kernel_size) // self.stride + 1) + (k // self.stride)
+
+                    inputs = [img[b, 0, j + i, k + l] for i in range(self.kernel_size) for l in range(self.kernel_size)]
+                    inputs = torch.tensor(inputs, device=self.device)
+                    
+                    output = self.linear_bottleneck_linear(inputs)
+                    '''
+                    ## with conv layer
+                    inputs = torch.reshape(inputs, (1,1,self.kernel_size,self.kernel_size))
+                    output = self.conv_encoder(inputs)
+                    output, idx = self.maxpooling(output)
+                    #print(inputs.shape)
+                    output = self.bottleneck(output)
+                    #inputs = self.bottleneck(torch.reshape(torch.cat((torch.reshape(inputs, (1,)), c)),(1,2)))
+                    output = self.unpooling(output, idx)
+                    output = self.conv_decoder(output)
+                    '''
+
+                    #out[b, 0, idx] = self.circuit(torch.cat((a, x_patch, y_patch)))[1]
+                    out[b, 0, idx] = nn.functional.cosine_similarity(inputs, output, dim=0)
+                    #out[b, 0, idx] = nn.functional.cosine_similarity(torch.flatten(inputs), torch.flatten(output), dim=0)
+                    idx = idx + 1
+
+        map = torch.zeros((bs, self.image_size + 2*self.padding, self.image_size + 2*self.padding))
+        count_image = torch.zeros((bs, self.image_size + 2*self.padding, self.image_size + 2*self.padding))
+        ppr = (self.image_size + 2*self.padding - self.kernel_size) // self.stride + 1
+        for b in range(bs):
+            for p in range(patch_no):
+                row_index = p // ppr
+                col_index = p % ppr
+                start_row = row_index * self.stride
+                start_col = col_index * self.stride
+            
+                for k in range(self.kernel_size):
+                    for l in range(self.kernel_size):
+                        map[b, start_row+k, start_col+l] += out[b, 0, p]
+                        count_image[b, start_row+k, start_col+l] += 1
+    
+        map /= count_image
+        if padding > 0:
+            map = map[:, padding:-padding, padding:-padding]
+    
+        return map
+
+    def old_forward(self, img):
         bs, ch, h, w = img.size()
 
         patch_no = ((h - self.patch_size) // self.patch_stride + 1) * ((h - self.patch_size) // self.patch_stride + 1)    
@@ -96,13 +158,13 @@ class Classical_autoencoder(nn.Module):
                     inputs = [img[b, 0, j + i, k + l] for i in range(self.patch_size) for l in range(self.patch_size)]
                     inputs = torch.tensor(inputs, device=self.device)
                     inputs = torch.reshape(inputs, (1,1,self.patch_size,self.patch_size))
-                    #inputs = self.linear_bottleneck_linear(inputs)
+                    inputs = self.linear_bottleneck_linear(inputs)
                     #inputs = self.linear_encoder(inputs)
                     #inputs = self.bottleneck2(torch.reshape(torch.cat((torch.reshape(inputs, (3,)), c)),(1,4)))
                     #inputs = self.bottleneck(inputs)
                     #inputs = self.linear_decoder(inputs)
                     
-                    
+                    '''
                     inputs = self.conv_encoder(inputs)
                     inputs, idx = self.maxpooling(inputs)
                     #print(inputs.shape)
@@ -110,7 +172,8 @@ class Classical_autoencoder(nn.Module):
                     #inputs = self.bottleneck(torch.reshape(torch.cat((torch.reshape(inputs, (1,)), c)),(1,2)))
                     inputs = self.unpooling(inputs, idx)
                     inputs = self.conv_decoder(inputs)
-                    
+                    '''
+
                     for i in range(self.patch_size):
                         for l in range(self.patch_size):
                             out[b, 0, j + i, k + l] += inputs[0][i * self.patch_size + l]
@@ -138,18 +201,19 @@ def run(chunk, seeds, lr, num_epochs, image_size, training_size, noise, threshol
             else:
                 n_normal = 32
 
-            model_name = "Classical_"+dataset_name+"_KS"+str(conf['patch_size'])+"_ST"+str(conf['patch_stride'])+"_BD"+str(conf['bottleneck_dim'])+"_s"+str(seed)
+            model_name = "CLASSICAL_"+dataset_name+"_KS"+str(conf['kernel_size'])+"_ST"+str(conf['stride'])+"_s"+str(seed)
             print("train: " + model_name)
             
-            if dataset_name == 'MNIST':
+            if dataset_name == 'mnist':
                 train_loader, valid_loader, test_loader, mask_loader = load_mnist_dataset(training_size, image_size)
             else:
                 train_loader, valid_loader, test_loader, mask_loader = load_MVTEC(dataset_name, training_size, image_size)
             
-            loss_fn = torch.nn.MSELoss()
+            loss_fn = loss_function
 
             device = "cpu"
-
+            
+            torch.manual_seed(seed)
             autoencoder = Classical_autoencoder(image_size, conf)
             
             params_to_optimize = [
@@ -168,7 +232,9 @@ def run(chunk, seeds, lr, num_epochs, image_size, training_size, noise, threshol
                 print('\n EPOCH {}/{} \t train loss {} \t val loss {}'.format(epoch + 1, num_epochs, train_loss, val_loss))
                 train_loss_seed.append(train_loss)
                 val_loss_seed.append(val_loss)
-                plot_ae_outputs(device, epoch, autoencoder, test_loader, n=10, model_name=model_name)
+                
+                #if (epoch == 0) or (epoch == num_epochs-1) or (epoch % 5 == 0):
+                #plot_ae_outputs_with_reconstruction(autoencoder, model_name, test_loader, conf, image_size, epoch, device, n=10) 
                 if epoch == int(num_epochs/2)-1:
                     torch.save(autoencoder.state_dict(), './models/10epochs_' + model_name + '.pt')
             print("test: " + model_name)
@@ -198,7 +264,7 @@ def run(chunk, seeds, lr, num_epochs, image_size, training_size, noise, threshol
                 
         mean_metrics = np.mean(metrics, axis=1)
         std_metrics = np.std(metrics, axis=1)
-        filename = "./results/Classical_" + dataset_name+"_KS"+str(conf['patch_size'])+"_ST"+str(conf['patch_stride'])+"_BD"+str(conf['bottleneck_dim'])+"_metrics.csv"
+        filename = "./results/CLASSICAL_" + dataset_name+"_KS"+str(conf['kernel_size'])+"_ST"+str(conf['stride'])+"_metrics.csv"
         df_means = pd.DataFrame(mean_metrics)
         df_means.columns = ["mean_acc","mean_dice","mean_iou","mean_aupro","mean_auroc"]
         df_std = pd.DataFrame(std_metrics)
@@ -207,7 +273,7 @@ def run(chunk, seeds, lr, num_epochs, image_size, training_size, noise, threshol
         df['threshold'] = thresholds
         df = df[["threshold", "mean_acc", "std_acc", "mean_dice", "std_dice", "mean_iou", "std_iou", "mean_aupro", "std_aupro", "mean_auroc", "std_auroc"]]
         df.to_csv(filename)
-        plot_loss_curve_avg(train_losses, val_losses, dataset_name+"_KS"+str(conf['patch_size'])+"_ST"+str(conf['patch_stride'])+"_BD"+str(conf['bottleneck_dim']))
+        plot_loss_curve_avg(train_losses, val_losses, "CLASSICAL_"+dataset_name+"_KS"+str(conf['kernel_size'])+"_ST"+str(conf['stride']))
 
 def par_runs(params, seeds, lr, num_epochs, image_size, training_size, noise, thresholds, n_processes=2):
     
@@ -247,13 +313,13 @@ def train_epoch(autoencoder, device, dataloader, loss_fn, optimizer, noise):
         # normalize data to the range (0,1)
         #decoded_data = (decoded_data - torch.min(decoded_data)) / (torch.max(decoded_data) - torch.min(decoded_data))
         # evaluate loss
-        loss = loss_fn(decoded_data, image_batch)
+        loss = loss_fn(decoded_data)
         # backward pass
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
         # print batch loss
-        #print('\t partial train loss (single batch): %f' % (loss.data))
+        print('\t partial train loss (single batch): %f' % (loss.data))
         train_loss.append(loss.detach().cpu().numpy())
     
     return np.mean(train_loss)
@@ -287,44 +353,36 @@ def test_epoch(autoencoder, device, dataloader, loss_fn, noise):
         conc_out = torch.cat(conc_out)
         conc_label = torch.cat(conc_label)
         # evaluate global loss
-        val_loss = loss_fn(conc_out, conc_label)
+        val_loss = loss_fn(conc_out)
     return val_loss.data
 
-def plot_ae_outputs(device, epoch, autoencoder, test_loader, n=10, model_name="AE"):
-    plt.figure(figsize=(16,4.5))
-    targets = []
-    for i, (_, target) in enumerate(test_loader.dataset):
-        targets.append(target)
-    targets = np.array(targets)
+def build_map(patches_scores, image_size, patch_size, stride, padding):
+    map = np.zeros((image_size + 2*padding, image_size + 2*padding))
+    count_image = np.zeros((image_size + 2*padding, image_size + 2*padding))
+    ppr = (image_size + 2*padding - patch_size) // stride + 1
+    for p in range(patches_scores.shape[2]):
+        row_index = p // ppr
+        col_index = p % ppr
+        start_row = row_index * stride
+        start_col = col_index * stride
+       
+        for k in range(patch_size):
+            for l in range(patch_size):
+                map[start_row+k, start_col+l] += float(patches_scores[0, 0, p])
+                count_image[start_row+k, start_col+l] += 1
+ 
+    map /= count_image
+ 
+    if padding > 0:
+        map = map[padding:-padding, padding:-padding]
+ 
+    return (map + 1)/2
 
-    t_idx = {}
-    for i in range(10):
-        if i in targets:
-            t_idx[i] = np.where(targets==i)[0][0]
 
-
-    for i in range(n):
-        if i in targets:
-            ax = plt.subplot(2, n, i+1)
-            img = test_loader.dataset[t_idx[i]][0].unsqueeze(0).to(device)
-            autoencoder
-            with torch.no_grad():
-                rec_img = autoencoder(img).to(device)
-                #rec_img  = decoder(encoder(img))
-            plt.imshow(img.cpu().squeeze().numpy(), cmap='gist_gray')
-            ax.get_xaxis().set_visible(False)
-            ax.get_yaxis().set_visible(False)  
-            if i == n//2:
-                ax.set_title('Original images')
-            ax = plt.subplot(2, n, i + 1 + n)
-            plt.imshow(rec_img.cpu().squeeze().numpy(), cmap='gist_gray')  
-            ax.get_xaxis().set_visible(False)
-            ax.get_yaxis().set_visible(False)  
-            if i == n//2:
-                ax.set_title('Reconstructed images')
-    #plt.show()
-    plt.savefig("./output_images/" + model_name + "_epoch_" + str(epoch) + ".png")  
-    plt.close() 
+def loss_function(output):
+    #print(torch.mean(output, 2))    
+    #return (1-torch.mean(output))/2
+    return 1-torch.mean(output)
 
 def plot_loss_curve(train_loss, val_loss, model_name):
     # Plot losses
@@ -367,9 +425,6 @@ def plot_loss_curve_avg(train_losses, val_losses, model_name):
 
 def test_with_mask(autoencoder, model_name, test_loader, mask_loader, params, image_size, device='cpu', threshold=0.025, n_normal=28):
 
-    autoencoder = Classical_autoencoder(image_size, params)
-    autoencoder.load_state_dict(torch.load(model_name + ".pt"))
-    autoencoder.to(device)
 
     # compute accuracy
     accuracies = []
@@ -382,11 +437,12 @@ def test_with_mask(autoencoder, model_name, test_loader, mask_loader, params, im
         mask = np.array(mask_loader.dataset[i][0].unsqueeze(0).to(device)[0,0,:,:]) #####
         mask = np.where(mask > 0.5, 1, 0)
         with torch.no_grad():
-            rec_img = autoencoder(img).to(device)
-        diff = (rec_img.cpu().squeeze().numpy() - img.cpu().squeeze().numpy())
+            #rec_img = autoencoder(img).to(device)
+            map = autoencoder(img)
+        #map = build_map(patches_scores, image_size, autoencoder.kernel_size, autoencoder.stride, autoencoder.padding)
         #print(np.min(map))
         #print(np.max(map))
-        diff = np.where(map > threshold, 0, 1) #anomalies are white in the masks
+        diff = np.where(map > threshold, 0, 1) #anomalies are white (1) in the masks
         acc = pixel_accuracy(mask, diff)
         dice = dice_coefficient(mask, diff)
         iou = IOU(mask, diff)
@@ -412,8 +468,9 @@ def test_with_mask(autoencoder, model_name, test_loader, mask_loader, params, im
         mask = np.array(mask_loader.dataset[i+n_normal][0].unsqueeze(0).to(device)[0,0,:,:])
         mask = np.where(mask > 0.5, 1, 0)
         with torch.no_grad():
-            rec_img = autoencoder(img).to(device)
-        diff = (rec_img.cpu().squeeze().numpy() - img.cpu().squeeze().numpy())
+            #rec_img = autoencoder(img).to(device)
+            patches_scores = full_autoencoder.reconstruction(img)
+        map = build_map(patches_scores, image_size, autoencoder.kernel_size, autoencoder.stride, autoencoder.padding)
         diff = np.where(map > threshold, 0, 1) #anomalies are white in the masks
         plt.imshow(img.cpu().squeeze().numpy(), cmap='gist_gray')
         #ax.set_title("label: " + str(test_loader.dataset[i][1]), y=0, pad=-15)
@@ -423,7 +480,7 @@ def test_with_mask(autoencoder, model_name, test_loader, mask_loader, params, im
         plt.imshow(diff, cmap='gist_gray')  
         ax.get_xaxis().set_visible(False)
         ax.get_yaxis().set_visible(False)  
-        #ax.set_title(round(loss_fn(img, ).item(), 4), y=0, pad=-15)
+        #ax.set_title(round(loss_fn(img).item(), 4), y=0, pad=-15)
         ax = plt.subplot(3, 10, i + 1 + 20)
         plt.imshow(mask.squeeze().numpy(), cmap='gist_gray')  
         ax.get_xaxis().set_visible(False)
@@ -436,7 +493,6 @@ def test_with_mask(autoencoder, model_name, test_loader, mask_loader, params, im
 
 if __name__ == "__main__":
     
-
     if len(sys.argv) != 2:
         print("ERROR: type '" + str(sys.argv[0]) + " n_processes' to execute the test")
         exit()
@@ -456,24 +512,22 @@ if __name__ == "__main__":
     num_epochs = 20
     #image_size = 64
     #training_size = 280
-    image_size = 64
+    image_size = 32 
     training_size = 125
     noise = False
 
+    print("Image size: " + str(image_size))
+    print("Training size: " + str(training_size))
+    print("Learning rate: " + str(lr))
+    print("Epochs: " + str(num_epochs))
+
     # variable parameters
     params = {
-        'dataset': ["mnist"],
-        'patch_size': [4],
-        'patch_stride': [1],
-        'patch_padding': [0],
-        'kernel_size': [2],
-        'kernel_stride': [1],
-        'kernel_padding': [0],
-        'out_channels': [1]
+        'dataset': ["busi"],
+        'kernel_size': [8],
+        'stride': [1,2,4,8]
     }
 
     seeds = [123,456,789]
     thresholds = [0.999, 0.995, 0.990]
     par_runs(dict(params), seeds, lr, num_epochs, image_size, training_size, noise, thresholds, n_processes=processes)
-
-   
