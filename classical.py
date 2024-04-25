@@ -1,26 +1,18 @@
 import numpy as np
 import torch
-import torchvision
-from torchvision import datasets, transforms
-from torchvision.datasets import ImageFolder
-from torchvision.transforms import Lambda
-from torch.utils.data import DataLoader, random_split
+
 from torch import nn
 import torch.nn.functional as F
 import torch.optim as optim
 
 import sys
-
-from sklearn.metrics import accuracy_score
 import matplotlib.pyplot as plt
 import pandas as pd 
-import seaborn as sns
-#import medmnist
 
 from itertools import product
 import multiprocessing as mp
 
-from dataset import load_mnist_dataset, load_MVTEC
+from dataset import load_dataset
 from metrics import pixel_accuracy, IOU, dice_coefficient, AUPRO
 from ignite.contrib import metrics
 
@@ -36,41 +28,13 @@ class Classical_autoencoder(nn.Module):
         self.padding = 0
         self.image_size = image_size
 
-        self.conv_encoder = torch.nn.Sequential(
-            torch.nn.Conv2d(in_channels=1, out_channels=4, kernel_size=2, stride=2, padding=0),
-            torch.nn.ReLU(True)
-        )
-        self.maxpooling = torch.nn.MaxPool2d(kernel_size=2, stride=2, padding=0, return_indices=True)
-        self.bottleneck = torch.nn.Sequential(
-            #torch.nn.Flatten(),
-            torch.nn.Linear(2, 2),
-            torch.nn.ReLU(True),
-            #torch.nn.Linear(1, 2),
-            #torch.nn.ReLU(True),
-            #torch.nn.Linear(2, 1),
-            #torch.nn.ReLU(True),
-            #nn.Unflatten(dim=1, unflattened_size=(2, 1, 1))
-        )
-        self.unpooling = nn.MaxUnpool2d(kernel_size=2, stride=2, padding=0)
-        self.conv_decoder = torch.nn.Sequential(
-            torch.nn.ConvTranspose2d(in_channels=4, out_channels=1, kernel_size=2, stride=2, padding=0),
-            torch.nn.Sigmoid(),
-            torch.nn.Flatten()
-        )
-        
         self.linear_bottleneck_linear = torch.nn.Sequential(
-            #torch.nn.Flatten(),
-            #torch.nn.Linear(self.kernel_size*self.kernel_size, self.kernel_size*self.kernel_size),
-            #torch.nn.ReLU(True),
             torch.nn.Linear(self.kernel_size*self.kernel_size, 4),
             torch.nn.ReLU(True),
             torch.nn.Linear(4, 4),
             torch.nn.ReLU(True),
             torch.nn.Linear(4, self.kernel_size*self.kernel_size),
             torch.nn.ReLU(True),
-            #torch.nn.Linear(self.kernel_size*self.kernel_size, self.kernel_size*self.kernel_size),
-            #torch.nn.Sigmoid(),
-            #torch.nn.Flatten()
         )
         
     def forward(self, img):
@@ -89,32 +53,13 @@ class Classical_autoencoder(nn.Module):
         out = torch.zeros((bs, 1, patch_no))
         
         for b in range(bs):
-            #print(b,bs)
             idx = 0
             for j in range(0, h - kernel_size + 1, self.stride):
                 for k in range(0, w - kernel_size + 1, self.stride):
-                    #get patch id
-                    patch_id = (j // self.stride) * ((w - kernel_size) // self.stride + 1) + (k // self.stride)
-
                     inputs = [img[b, 0, j + i, k + l] for i in range(self.kernel_size) for l in range(self.kernel_size)]
-                    inputs = torch.tensor(inputs, device=self.device)
-                    
+                    inputs = torch.tensor(inputs, device=self.device)                   
                     output = self.linear_bottleneck_linear(inputs)
-                    '''
-                    ## with conv layer
-                    inputs = torch.reshape(inputs, (1,1,self.kernel_size,self.kernel_size))
-                    output = self.conv_encoder(inputs)
-                    output, idx = self.maxpooling(output)
-                    #print(inputs.shape)
-                    output = self.bottleneck(output)
-                    #inputs = self.bottleneck(torch.reshape(torch.cat((torch.reshape(inputs, (1,)), c)),(1,2)))
-                    output = self.unpooling(output, idx)
-                    output = self.conv_decoder(output)
-                    '''
-
-                    #out[b, 0, idx] = self.circuit(torch.cat((a, x_patch, y_patch)))[1]
                     out[b, 0, idx] = nn.functional.cosine_similarity(inputs, output, dim=0)
-                    #out[b, 0, idx] = nn.functional.cosine_similarity(torch.flatten(inputs), torch.flatten(output), dim=0)
                     idx = idx + 1
 
         map = torch.zeros((bs, self.image_size + 2*self.padding, self.image_size + 2*self.padding))
@@ -138,51 +83,6 @@ class Classical_autoencoder(nn.Module):
     
         return map
 
-    def old_forward(self, img):
-        bs, ch, h, w = img.size()
-
-        patch_no = ((h - self.patch_size) // self.patch_stride + 1) * ((h - self.patch_size) // self.patch_stride + 1)    
-        patch_padding = self.patch_padding
-        if patch_padding > 0:
-            img = nn.ZeroPad2d(patch_padding)(img)
-            h = h + patch_padding*2
-            w = w + patch_padding*2
-        out = torch.zeros((bs, 1, h, w), device=self.device) 
-        count_image = torch.zeros((bs, 1, w, h), device=self.device)
-            #print(b,bs)
-        for b in range(bs):
-            for j in range(0, h - self.patch_size + 1, self.patch_stride):
-                for k in range(0, w - self.patch_size + 1, self.patch_stride):
-                    patch_id = (j // self.patch_stride) * (h // self.patch_stride) + (k // self.patch_stride)
-                    c = torch.tensor([patch_id/patch_no], device=self.device)
-                    inputs = [img[b, 0, j + i, k + l] for i in range(self.patch_size) for l in range(self.patch_size)]
-                    inputs = torch.tensor(inputs, device=self.device)
-                    inputs = torch.reshape(inputs, (1,1,self.patch_size,self.patch_size))
-                    inputs = self.linear_bottleneck_linear(inputs)
-                    #inputs = self.linear_encoder(inputs)
-                    #inputs = self.bottleneck2(torch.reshape(torch.cat((torch.reshape(inputs, (3,)), c)),(1,4)))
-                    #inputs = self.bottleneck(inputs)
-                    #inputs = self.linear_decoder(inputs)
-                    
-                    '''
-                    inputs = self.conv_encoder(inputs)
-                    inputs, idx = self.maxpooling(inputs)
-                    #print(inputs.shape)
-                    inputs = self.bottleneck(inputs)
-                    #inputs = self.bottleneck(torch.reshape(torch.cat((torch.reshape(inputs, (1,)), c)),(1,2)))
-                    inputs = self.unpooling(inputs, idx)
-                    inputs = self.conv_decoder(inputs)
-                    '''
-
-                    for i in range(self.patch_size):
-                        for l in range(self.patch_size):
-                            out[b, 0, j + i, k + l] += inputs[0][i * self.patch_size + l]
-                    count_image[b, 0, j:j+self.patch_size, k:k+self.patch_size] += 1
-        out /= count_image
-
-        if patch_padding > 0:
-            out = out[:, :, patch_padding:-patch_padding, patch_padding:-patch_padding]           
-        return out
 ####################################
 
 def run(chunk, seeds, lr, num_epochs, image_size, training_size, noise, thresholds):
@@ -204,10 +104,7 @@ def run(chunk, seeds, lr, num_epochs, image_size, training_size, noise, threshol
             model_name = "CLASSICAL_"+dataset_name+"_KS"+str(conf['kernel_size'])+"_ST"+str(conf['stride'])+"_s"+str(seed)
             print("train: " + model_name)
             
-            if dataset_name == 'mnist':
-                train_loader, valid_loader, test_loader, mask_loader = load_mnist_dataset(training_size, image_size)
-            else:
-                train_loader, valid_loader, test_loader, mask_loader = load_MVTEC(dataset_name, training_size, image_size)
+            train_loader, valid_loader, test_loader, mask_loader = load_dataset(dataset_name, training_size, image_size)
             
             loss_fn = loss_function
 
@@ -232,9 +129,6 @@ def run(chunk, seeds, lr, num_epochs, image_size, training_size, noise, threshol
                 print('\n EPOCH {}/{} \t train loss {} \t val loss {}'.format(epoch + 1, num_epochs, train_loss, val_loss))
                 train_loss_seed.append(train_loss)
                 val_loss_seed.append(val_loss)
-                
-                #if (epoch == 0) or (epoch == num_epochs-1) or (epoch % 5 == 0):
-                #plot_ae_outputs_with_reconstruction(autoencoder, model_name, test_loader, conf, image_size, epoch, device, n=10) 
                 if epoch == int(num_epochs/2)-1:
                     torch.save(autoencoder.state_dict(), './models/10epochs_' + model_name + '.pt')
             print("test: " + model_name)
@@ -252,8 +146,6 @@ def run(chunk, seeds, lr, num_epochs, image_size, training_size, noise, threshol
             autoencoder.to(device)
             autoencoder.eval()
 
-            #test_encoder_with_reconstruction(autoencoder, model_name, test_loader, conf, image_size, device, n_normal)
-            
             for t, threshold in enumerate(thresholds):
                 acc, dice, iou, aupro, auroc = test_with_mask(autoencoder, model_name, test_loader, mask_loader, conf, image_size, device, threshold, n_normal)
                 metrics[t][s][0] = acc
@@ -310,8 +202,6 @@ def train_epoch(autoencoder, device, dataloader, loss_fn, optimizer, noise):
         image_batch = image_batch.to(device)
         # decode data
         decoded_data = autoencoder(image_batch)
-        # normalize data to the range (0,1)
-        #decoded_data = (decoded_data - torch.min(decoded_data)) / (torch.max(decoded_data) - torch.min(decoded_data))
         # evaluate loss
         loss = loss_fn(decoded_data)
         # backward pass
@@ -344,8 +234,6 @@ def test_epoch(autoencoder, device, dataloader, loss_fn, noise):
                 decoded_data = autoencoder(corrupted_image_batch)
             else:
                 decoded_data = autoencoder(image_batch)
-            # normalize data to the range (0,1)
-            #decoded_data = (decoded_data - torch.min(decoded_data)) / (torch.max(decoded_data) - torch.min(decoded_data))
             # append the network output and the original image to the lists
             conc_out.append(decoded_data.cpu())
             conc_label.append(image_batch.cpu())
@@ -380,8 +268,6 @@ def build_map(patches_scores, image_size, patch_size, stride, padding):
 
 
 def loss_function(output):
-    #print(torch.mean(output, 2))    
-    #return (1-torch.mean(output))/2
     return 1-torch.mean(output)
 
 def plot_loss_curve(train_loss, val_loss, model_name):
@@ -424,8 +310,6 @@ def plot_loss_curve_avg(train_losses, val_losses, model_name):
     plt.close()
 
 def test_with_mask(autoencoder, model_name, test_loader, mask_loader, params, image_size, device='cpu', threshold=0.025, n_normal=28):
-
-
     # compute accuracy
     accuracies = []
     dice_scores = []
@@ -437,11 +321,7 @@ def test_with_mask(autoencoder, model_name, test_loader, mask_loader, params, im
         mask = np.array(mask_loader.dataset[i][0].unsqueeze(0).to(device)[0,0,:,:]) #####
         mask = np.where(mask > 0.5, 1, 0)
         with torch.no_grad():
-            #rec_img = autoencoder(img).to(device)
             map = autoencoder(img)
-        #map = build_map(patches_scores, image_size, autoencoder.kernel_size, autoencoder.stride, autoencoder.padding)
-        #print(np.min(map))
-        #print(np.max(map))
         diff = np.where(map > threshold, 0, 1) #anomalies are white (1) in the masks
         acc = pixel_accuracy(mask, diff)
         dice = dice_coefficient(mask, diff)
@@ -454,40 +334,9 @@ def test_with_mask(autoencoder, model_name, test_loader, mask_loader, params, im
         dice_scores.append(dice)
         iou_scores.append(iou)
 
-    #print("Accuracy: " + str(np.mean(accuracies)))
-    #print("Dice Score: " + str(np.mean(dice_scores)))
-    #print("IoU: " + str(np.mean(iou_scores)))
     aupro = aupro.compute()
     auroc = auroc.compute()
-    #print("AUPRO: " + str(aupro))
-    '''
-    plt.figure(figsize=(16, 4.5))
-    for i in range(10):
-        ax = plt.subplot(3, 10, i+1)
-        img = test_loader.dataset[i+n_normal][0].unsqueeze(0).to(device)
-        mask = np.array(mask_loader.dataset[i+n_normal][0].unsqueeze(0).to(device)[0,0,:,:])
-        mask = np.where(mask > 0.5, 1, 0)
-        with torch.no_grad():
-            #rec_img = autoencoder(img).to(device)
-            patches_scores = full_autoencoder.reconstruction(img)
-        map = build_map(patches_scores, image_size, autoencoder.kernel_size, autoencoder.stride, autoencoder.padding)
-        diff = np.where(map > threshold, 0, 1) #anomalies are white in the masks
-        plt.imshow(img.cpu().squeeze().numpy(), cmap='gist_gray')
-        #ax.set_title("label: " + str(test_loader.dataset[i][1]), y=0, pad=-15)
-        ax.get_xaxis().set_visible(False)
-        ax.get_yaxis().set_visible(False)  
-        ax = plt.subplot(3, 10, i + 1 + 10)
-        plt.imshow(diff, cmap='gist_gray')  
-        ax.get_xaxis().set_visible(False)
-        ax.get_yaxis().set_visible(False)  
-        #ax.set_title(round(loss_fn(img).item(), 4), y=0, pad=-15)
-        ax = plt.subplot(3, 10, i + 1 + 20)
-        plt.imshow(mask.squeeze().numpy(), cmap='gist_gray')  
-        ax.get_xaxis().set_visible(False)
-        ax.get_yaxis().set_visible(False) 
-        
-    plt.savefig("./output_images/" + model_name + "_t" + str(threshold) + "_masks.png")
-    '''
+    
     return np.mean(accuracies), np.mean(dice_scores), np.mean(iou_scores), aupro, auroc
  
 
@@ -510,8 +359,6 @@ if __name__ == "__main__":
     # fixed parameters
     lr = 0.005
     num_epochs = 20
-    #image_size = 64
-    #training_size = 280
     image_size = 32 
     training_size = 125
     noise = False
