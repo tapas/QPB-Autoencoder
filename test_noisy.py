@@ -739,5 +739,5 @@ if __name__ == "__main__":
     }
 
     seeds = [123,456,789]
-    thresholds = [0.950,0.955,0.960,0.965,0.970,0.975,0.980,0.985,0.990,0.995,0.999]
+    thresholds = [0.999, 0.995, 0.990]
     par_runs(dict(params), seeds, lr, num_epochs, image_size, training_size, noise, thresholds, n_processes=processes, train=True)
