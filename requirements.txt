@@ -1,0 +1,13 @@
+ignite==1.1.0
+matplotlib==3.8.3
+numpy==1.26.4
+opencv-python==4.10.0.84
+pandas==2.2.1
+PennyLane==0.37.0
+PennyLane-qiskit==0.37.0
+PennyLane_Lightning==0.37.0
+pytorch-ignite==0.5.1
+torch==2.2.1
+torchaudio==2.2.1
+torchmetrics==1.4.1
+torchvision==0.17.1
