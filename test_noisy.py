@@ -14,30 +14,8 @@ from dataset import load_dataset
 from metrics import pixel_accuracy, IOU, dice_coefficient, AUPRO
 from ignite.contrib import metrics
 
-from qiskit.providers.fake_provider import *
-from qiskit_aer.noise import NoiseModel, errors
-from qiskit_aer import AerSimulator, noise
 
 from functools import partial
-'''
-noisy_instance = Fake20QV1()
-noise_model = NoiseModel.from_backend(noisy_instance)
-coupling_map = noisy_instance.configuration().coupling_map
-basis_gates = noise_model.basis_gates
-'''
-# Error probabilities
-prob_1 = 0.001  # 1-qubit gate
-prob_2 = 0.01   # 2-qubit gate
-
-# Depolarizing quantum errors
-error_1 = noise.depolarizing_error(prob_1, 1)
-error_2 = noise.depolarizing_error(prob_2, 2)
-
-# Add errors to noise model
-noise_model = noise.NoiseModel()
-noise_model.add_all_qubit_quantum_error(error_1, ['u1', 'u2', 'u3'])
-noise_model.add_all_qubit_quantum_error(error_2, ['cx'])
-
 
 def MPS_BLOCK(weights, wires):
     qml.RY(weights[0], wires=wires[0])
