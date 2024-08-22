@@ -709,7 +709,7 @@ if __name__ == "__main__":
     params = {
         'dataset': ["busi"],
         'kernel_size': [8],
-        'stride': [1,2,4,8],
+        'stride': [8],
         'bottleneck_dim': [2],
         'mps_layers': [1],
         'n_block_wires': [2], 
