@@ -707,9 +707,9 @@ if __name__ == "__main__":
 
     # variable parameters
     params = {
-        'dataset': ["busi"],
-        'kernel_size': [8],
-        'stride': [8],
+        'dataset': ["carpet, leather, wood, busi"],
+        'kernel_size': [4],
+        'stride': [1],
         'bottleneck_dim': [2],
         'mps_layers': [1],
         'n_block_wires': [2], 
@@ -717,5 +717,5 @@ if __name__ == "__main__":
     }
 
     seeds = [123,456,789]
-    thresholds = [0.999, 0.995, 0.990]
+    thresholds = [x/1000 for x in range(1,26,1)]
     par_runs(dict(params), seeds, lr, num_epochs, image_size, training_size, noise, thresholds, n_processes=processes, train=True)
