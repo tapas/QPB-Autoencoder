@@ -707,7 +707,7 @@ if __name__ == "__main__":
 
     # variable parameters
     params = {
-        'dataset': ["carpet", "leather", "wood", "busi"],
+        'dataset': ["wood"],
         'kernel_size': [4],
         'stride': [1],
         'bottleneck_dim': [2],
